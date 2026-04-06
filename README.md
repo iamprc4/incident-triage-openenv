@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Incident Triage OpenEnv
 
 A real-world OpenEnv environment for **IT incident triage**.  
@@ -133,3 +134,15 @@ Also run:
 ```bash
 openenv validate
 ```
+=======
+---
+title: Incident Triage Openenv
+emoji: 🔥
+colorFrom: green
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+>>>>>>> 00e4149c1f6a12a28f63a755f5c71c76e2f8c7fc
