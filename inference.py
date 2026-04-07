@@ -8,11 +8,11 @@ from openai import OpenAI
 from incident_triage_env import IncidentAction, IncidentTriageEnv
 
 IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") or os.getenv("IMAGE_NAME")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "dummy-key"
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+API_KEY = os.environ["API_KEY"]
+API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 TASK_NAME = os.getenv("INCIDENT_TRIAGE_TASK", "")
-POLICY_MODE = os.getenv("POLICY_MODE", "heuristic").lower()
+POLICY_MODE = os.getenv("POLICY_MODE", "llm").lower()
 BENCHMARK = "incident_triage_openenv"
 MAX_STEPS = 3
 TEMPERATURE = 0.0
@@ -135,10 +135,10 @@ async def run_episode(task_name: str, client: Optional[OpenAI]) -> float:
         for step in range(1, MAX_STEPS + 1):
             if result.done:
                 break
-            if POLICY_MODE == "llm" and client is not None:
-                action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
-            else:
+            if POLICY_MODE == "heuristic":
                 action = _heuristic_action(result.observation.ticket_text, result.observation.task_name)
+            else:
+                action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
             result = await env.step(action)
             reward = result.reward or 0.0
             rewards.append(reward)
@@ -160,7 +160,7 @@ async def main() -> None:
         "medium_db_latency",
         "hard_security_breach",
     ]
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY) if POLICY_MODE == "llm" else None
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
     scores: List[float] = []
     for task_name in selected_tasks:
         score = await run_episode(task_name, client)

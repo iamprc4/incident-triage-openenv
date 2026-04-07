@@ -104,15 +104,15 @@ python inference.py
 ```
 
 Optional environment variables:
-- `HF_TOKEN`
+- `API_KEY`
 - `API_BASE_URL`
 - `MODEL_NAME`
 - `LOCAL_IMAGE_NAME`
-- `POLICY_MODE` (`heuristic|llm`, default `heuristic` for reproducibility)
+- `POLICY_MODE` (`llm|heuristic`, default `llm` for validator compatibility)
 - `INCIDENT_TRIAGE_TASK` (`easy_password_reset|medium_db_latency|hard_security_breach`) to run a single task
 
-The script is deterministic by default and uses a fixed heuristic policy so scores are reproducible across runs.  
-Set `POLICY_MODE=llm` to query a hosted model.
+The validator path uses OpenAI client calls through injected `API_BASE_URL` + `API_KEY` by default.  
+Set `POLICY_MODE=heuristic` only for local reproducible offline checks.
 
 ## Docker
 
