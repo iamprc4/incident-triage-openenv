@@ -68,11 +68,12 @@ Per-step reward is the mean of six deterministic sub-scores:
 - category correctness
 - priority correctness
 - owner team correctness
-- runbook keyword coverage
-- customer message quality
-- summary quality
+- runbook quality: **all** required phrases (per task) must appear across `runbook_steps` (substring match, case-insensitive)
+- customer message quality: **all** required phrases must appear in `customer_message`
+- summary quality: combines length (targets ~12+ words) with **summary terms** that must reflect the ticket (e.g. MFA/phone, migration/latency, token/billing)
 
-This gives dense guidance, not sparse binary-only success.
+Episode success uses `reward >= 0.92` after shaping (see `incident_triage_env.py`).  
+Noisy ticket text is intentional: agents must ignore distractors and still hit exact grader phrases—strong models that paraphrase everything can score **below** a careful baseline.
 
 ## Setup
 

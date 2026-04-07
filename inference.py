@@ -43,7 +43,10 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
 def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
     if task_name == "easy_password_reset":
         return IncidentAction(
-            summary="User lost MFA access after phone replacement and needs identity-verified recovery.",
+            summary=(
+                "User lost MFA access after phone replacement and needs identity-verified recovery; "
+                "authenticator delivery failure suspected."
+            ),
             category="auth",
             priority="medium",
             owner_team="support",
@@ -59,7 +62,10 @@ def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
         )
     if task_name == "medium_db_latency":
         return IncidentAction(
-            summary="Checkout latency rose after migration and requires immediate DB performance triage.",
+            summary=(
+                "Checkout API latency regressed sharply after the schema migration and requires database "
+                "performance triage on hot query paths."
+            ),
             category="database",
             priority="high",
             owner_team="db",
@@ -74,19 +80,22 @@ def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
             ),
         )
     return IncidentAction(
-        summary="Potential credential compromise with anomalous admin token usage and data access spikes.",
+        summary=(
+            "Anomalous admin token usage with billing table export spikes suggests credential compromise "
+            "and requires immediate security response."
+        ),
         category="security",
         priority="critical",
         owner_team="security",
         runbook_steps=[
             "Revoke tokens for potentially compromised admin identities",
-            "Isolate privileged access paths and tighten controls",
+            "Isolate access for privileged paths and tighten session controls",
             "Audit logs for exfiltration timeline and scope",
             "Notify legal and incident command process",
         ],
         customer_message=(
             "We have initiated containment for a security incident and are prioritizing protection of data. "
-            "Next update will follow after forensic validation."
+            "Next update will follow after forensic validation and scope review."
         ),
     )
 

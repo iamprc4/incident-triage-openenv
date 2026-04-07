@@ -59,8 +59,9 @@ TASKS: Dict[str, TaskSpec] = {
         name="easy_password_reset",
         ticket_id="INC-1001",
         ticket_text=(
-            "Customer cannot log in after phone replacement. MFA codes no longer arrive. "
-            "No suspicious logins. Account created yesterday."
+            "[Priority] User reports login failure after replacing phone. Marketing blast also says "
+            "\"VERIFY NOW — limited offer\" but user insists they did not click phishing links. "
+            "Authenticator codes stopped arriving ~2h ago. No odd sign-ins in IdP. New device enrolled yesterday."
         ),
         context={"region": "eu-west", "recent_changes": ["new device"], "sla_minutes": 120},
         target={
@@ -69,6 +70,8 @@ TASKS: Dict[str, TaskSpec] = {
             "owner_team": "support",
             "keywords": ["mfa reset", "verify identity"],
             "message_keywords": ["help", "verify", "restore access"],
+            # Must reflect ticket substance (noise-resistant).
+            "summary_terms": ["mfa", "phone"],
         },
         max_attempts=2,
     ),
@@ -76,8 +79,9 @@ TASKS: Dict[str, TaskSpec] = {
         name="medium_db_latency",
         ticket_id="INC-2042",
         ticket_text=(
-            "Checkout API p95 latency jumped from 280ms to 4.1s after a schema migration. "
-            "Error rate is low, but queue depth is increasing every minute."
+            "Checkout API p95 latency: 280ms -> 4.1s since schema migration (deploy 2026.04.06.3). "
+            "Errors ~0.2% but queue depth rising. "
+            "Unrelated promo links in ticket: https://example.com/promo https://track.example/r/abc — ignore for triage."
         ),
         context={"service": "checkout", "deployment": "2026.04.06.3", "sla_minutes": 45},
         target={
@@ -86,6 +90,7 @@ TASKS: Dict[str, TaskSpec] = {
             "owner_team": "db",
             "keywords": ["rollback migration", "analyze slow query", "index"],
             "message_keywords": ["investigating", "performance", "update"],
+            "summary_terms": ["migration", "latency"],
         },
         max_attempts=3,
     ),
@@ -93,8 +98,9 @@ TASKS: Dict[str, TaskSpec] = {
         name="hard_security_breach",
         ticket_id="INC-9007",
         ticket_text=(
-            "SIEM alerts indicate anomalous admin token usage from two geographies in 8 minutes. "
-            "Data export spikes observed on billing tables. Potential credential compromise."
+            "SIEM: anomalous admin token use from 2 regions in 8m. App log snippet shows "
+            "query = \"SELECT * FROM cust WHERE id=\" + req.id (unsafe pattern nearby). "
+            "Large reads from billing tables + export spike. Possible cred theft — not confirmed outage."
         ),
         context={"service": "billing", "customers_impacted": 7300, "sla_minutes": 15},
         target={
@@ -103,6 +109,7 @@ TASKS: Dict[str, TaskSpec] = {
             "owner_team": "security",
             "keywords": ["revoke tokens", "isolate access", "audit logs", "legal"],
             "message_keywords": ["containment", "security incident", "next update"],
+            "summary_terms": ["token", "billing"],
         },
         max_attempts=3,
     ),
@@ -156,7 +163,7 @@ class IncidentTriageEnv:
         self._last_signals = signals.model_dump()
 
         maxed_attempts = self._attempts_used >= self.task.max_attempts
-        solved = reward >= 0.95
+        solved = reward >= 0.92
         self._done = solved or maxed_attempts
         obs = self.state()
         return StepResult(
@@ -195,27 +202,37 @@ class IncidentTriageEnv:
         return json.dumps(self.state().model_dump(), indent=2)
 
 
-def _keyword_coverage(text: str, keywords: List[str], max_hits: int) -> float:
-    lowered = text.lower()
-    hits = sum(1 for keyword in keywords if keyword in lowered)
-    return min(hits / max_hits, 1.0) if max_hits else 1.0
+def _full_phrase_coverage(text_lower: str, phrases: List[str]) -> float:
+    """All phrases must appear for full credit; partial credit proportional to hits."""
+    if not phrases:
+        return 1.0
+    hits = sum(1 for phrase in phrases if phrase in text_lower)
+    return hits / len(phrases)
+
+
+def _summary_quality(action: IncidentAction, summary_terms: List[str]) -> float:
+    """Length + ticket-relevant terms so generic fluff cannot max the score."""
+    words = action.summary.split()
+    length_score = min(len(words) / 12.0, 1.0) if words else 0.0
+    s = action.summary.lower()
+    term_hits = sum(1 for t in summary_terms if t.lower() in s)
+    term_score = term_hits / len(summary_terms) if summary_terms else 1.0
+    return 0.45 * length_score + 0.55 * term_score
 
 
 def grade_action(task: TaskSpec, action: IncidentAction) -> GradeSignals:
     """Deterministic agent grader with partial credit in [0.0, 1.0]."""
     target = task.target
     runbook_text = " ".join(action.runbook_steps).lower()
+    msg_lower = action.customer_message.lower()
+    summary_terms: List[str] = list(target.get("summary_terms", []))
 
     category_score = 1.0 if action.category.lower() == target["category"] else 0.0
     priority_score = 1.0 if action.priority.lower() == target["priority"] else 0.0
     owner_score = 1.0 if action.owner_team.lower() == target["owner_team"] else 0.0
-    runbook_score = _keyword_coverage(runbook_text, target["keywords"], max_hits=max(len(target["keywords"]) - 1, 1))
-    customer_msg_score = _keyword_coverage(
-        action.customer_message,
-        target["message_keywords"],
-        max_hits=max(len(target["message_keywords"]) - 1, 1),
-    )
-    summary_score = 1.0 if len(action.summary.split()) >= 6 else 0.4
+    runbook_score = _full_phrase_coverage(runbook_text, target["keywords"])
+    customer_msg_score = _full_phrase_coverage(msg_lower, target["message_keywords"])
+    summary_score = _summary_quality(action, summary_terms)
 
     return GradeSignals(
         category=round(category_score, 4),
