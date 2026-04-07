@@ -18,6 +18,8 @@ MAX_STEPS = 3
 TEMPERATURE = 0.0
 MAX_TOKENS = 280
 SUCCESS_SCORE_THRESHOLD = 0.85
+STRICT_MIN_SCORE = 0.001
+STRICT_MAX_SCORE = 0.999
 
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -38,6 +40,11 @@ def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> No
         f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
+
+
+def _strict_unit_interval(value: float) -> float:
+    """Keep scores strictly within (0, 1) for validator compatibility."""
+    return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
 
 
 def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
@@ -146,7 +153,8 @@ async def run_episode(task_name: str, client: Optional[OpenAI]) -> float:
             log_step(step, action.model_dump_json(), reward, result.done, result.observation.last_action_error)
             if result.done:
                 break
-        score = min(max(sum(rewards) / max(len(rewards), 1), 0.0), 1.0)
+        raw_score = min(max(sum(rewards) / max(len(rewards), 1), 0.0), 1.0)
+        score = _strict_unit_interval(raw_score)
         success = score >= SUCCESS_SCORE_THRESHOLD
     finally:
         await env.close()
