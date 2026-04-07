@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -25,9 +25,10 @@ async def health() -> Dict[str, str]:
 
 
 @app.post("/reset")
-async def reset(req: ResetRequest) -> Dict[str, Any]:
+async def reset(req: Optional[ResetRequest] = None) -> Dict[str, Any]:
     global env
-    env = IncidentTriageEnv(task_name=req.task_name)
+    task_name = req.task_name if req else "easy_password_reset"
+    env = IncidentTriageEnv(task_name=task_name)
     result = await env.reset()
     return result.model_dump()
 
