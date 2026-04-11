@@ -37,15 +37,30 @@ def _strict_unit_interval(value: float) -> float:
     return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
 
 
+def _single_line_log_value(text: str, max_len: int = 240) -> str:
+    """One log line must not contain raw newlines; keep action/error compact."""
+    if not text:
+        return ""
+    s = text.replace("\n", " ").replace("\r", " ")
+    s = " ".join(s.split())
+    if len(s) > max_len:
+        s = s[: max_len - 3] + "..."
+    return s
+
+
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    error_val = error if error else "null"
+    safe_action = _single_line_log_value(action, max_len=240)
+    if error:
+        safe_error = _single_line_log_value(error, max_len=200)
+    else:
+        safe_error = "null"
     reward_clamped = _strict_unit_interval(reward)
     print(
-        f"[STEP] step={step} action={action} reward={reward_clamped:.2f} done={str(done).lower()} error={error_val}",
+        f"[STEP] step={step} action={safe_action} reward={reward_clamped:.2f} done={str(done).lower()} error={safe_error}",
         flush=True,
     )
 
@@ -160,7 +175,7 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             reward = float(result.reward or 0.0)
             rewards.append(reward)
             steps_taken = step
-            log_step(step, action.model_dump_json(), reward, result.done, result.observation.last_action_error)
+            log_step(step, action.summary, reward, result.done, result.observation.last_action_error)
             if result.done:
                 break
         if rewards:
