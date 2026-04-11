@@ -150,13 +150,18 @@ class IncidentTriageEnv:
         self._last_signals = {}
         self._best_reward = 0.0
         obs = self.state()
-        return StepResult(observation=obs, reward=0.0, done=False, info={"reset": True})
+        return StepResult(
+            observation=obs,
+            reward=STRICT_MIN_SCORE,
+            done=False,
+            info={"reset": True},
+        )
 
     async def step(self, action: IncidentAction) -> StepResult:
         if self._done:
             return StepResult(
                 observation=self.state(),
-                reward=0.0,
+                reward=STRICT_MIN_SCORE,
                 done=True,
                 info={"warning": "episode_already_done"},
             )

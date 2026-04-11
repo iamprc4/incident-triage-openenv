@@ -201,4 +201,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Some runtimes raise KeyboardInterrupt during loop teardown after work completed.
+        pass

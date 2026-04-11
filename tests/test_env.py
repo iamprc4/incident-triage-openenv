@@ -49,7 +49,7 @@ def test_reset_and_step_reward_bounds() -> None:
         for task_name in ("easy_password_reset", "medium_db_latency", "hard_security_breach"):
             env = IncidentTriageEnv(task_name=task_name)
             result = await env.reset()
-            assert result.reward == 0.0
+            assert 0.0 < result.reward < 1.0
             assert not result.done
 
             action = _baseline_action(task_name)
@@ -59,5 +59,8 @@ def test_reset_and_step_reward_bounds() -> None:
             assert 0.0 < result2.info["base_reward"] < 1.0
             assert 0.0 < result2.info["improvement_bonus"] < 1.0
             assert 0.0 < result2.info["attempt_penalty"] < 1.0
+
+            result3 = await env.step(action)
+            assert 0.0 < result3.reward < 1.0
 
     asyncio.run(run())
