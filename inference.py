@@ -8,18 +8,33 @@ from openai import OpenAI
 from incident_triage_env import IncidentAction, IncidentTriageEnv
 
 IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") or os.getenv("IMAGE_NAME")
-API_KEY = os.environ["API_KEY"]
-API_BASE_URL = os.environ["API_BASE_URL"]
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+
+# Per hackathon guidelines: defaults for API_BASE_URL and MODEL_NAME; HF_TOKEN mandatory.
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
 TASK_NAME = os.getenv("INCIDENT_TRIAGE_TASK", "")
 POLICY_MODE = os.getenv("POLICY_MODE", "llm").lower()
+if POLICY_MODE == "llm":
+    HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+    if HF_TOKEN is None:
+        raise ValueError(
+            "HF_TOKEN environment variable is required (or API_KEY when using the hackathon LLM proxy)"
+        )
+else:
+    HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "local-offline"
 BENCHMARK = "incident_triage_openenv"
 MAX_STEPS = 3
 TEMPERATURE = 0.0
 MAX_TOKENS = 280
 SUCCESS_SCORE_THRESHOLD = 0.85
-STRICT_MIN_SCORE = 0.001
-STRICT_MAX_SCORE = 0.999
+# Phase-2 style checks sometimes require scores strictly inside (0, 1); keep logs in open interval.
+# With :.2f formatting, 0.999 prints as "1.00"; cap at 0.99 so logs stay strictly below 1.00.
+STRICT_MIN_SCORE = 0.01
+STRICT_MAX_SCORE = 0.99
+
+
+def _strict_unit_interval(value: float) -> float:
+    return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
 
 
 def log_start(task: str, env: str, model: str) -> None:
@@ -28,23 +43,18 @@ def log_start(task: str, env: str, model: str) -> None:
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     error_val = error if error else "null"
+    reward_clamped = _strict_unit_interval(reward)
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={error_val}",
+        f"[STEP] step={step} action={action} reward={reward_clamped:.2f} done={str(done).lower()} error={error_val}",
         flush=True,
     )
 
 
-def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
-        flush=True,
-    )
-
-
-def _strict_unit_interval(value: float) -> float:
-    """Keep scores strictly within (0, 1) for validator compatibility."""
-    return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
+def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+    """Exactly one [END] line: success, steps, rewards only (no score field)."""
+    clamped = [_strict_unit_interval(r) for r in rewards]
+    rewards_str = ",".join(f"{r:.2f}" for r in clamped) if clamped else ""
+    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
 def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
@@ -127,15 +137,15 @@ def get_action_from_llm(client: OpenAI, ticket_text: str, task_name: str) -> Inc
         return _heuristic_action(ticket_text, task_name)
 
 
-async def run_episode(task_name: str, client: Optional[OpenAI]) -> float:
+async def run_episode(task_name: str, client: OpenAI) -> None:
+    """One episode: [START], then [STEP] per step, then [END] after close. No other stdout."""
     env = await IncidentTriageEnv.from_docker_image(IMAGE_NAME, task_name=task_name)
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.0
     success = False
+    display_model = MODEL_NAME if POLICY_MODE == "llm" else "heuristic-baseline"
 
-    model = MODEL_NAME if POLICY_MODE == "llm" else "heuristic-baseline"
-    log_start(task=task_name, env=BENCHMARK, model=model)
+    log_start(task=task_name, env=BENCHMARK, model=display_model)
 
     try:
         result = await env.reset()
@@ -147,19 +157,21 @@ async def run_episode(task_name: str, client: Optional[OpenAI]) -> float:
             else:
                 action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
             result = await env.step(action)
-            reward = result.reward or 0.0
+            reward = float(result.reward or 0.0)
             rewards.append(reward)
             steps_taken = step
             log_step(step, action.model_dump_json(), reward, result.done, result.observation.last_action_error)
             if result.done:
                 break
-        raw_score = min(max(sum(rewards) / max(len(rewards), 1), 0.0), 1.0)
-        score = _strict_unit_interval(raw_score)
-        success = score >= SUCCESS_SCORE_THRESHOLD
+        if rewards:
+            raw_mean = sum(rewards) / len(rewards)
+            mean_clamped = _strict_unit_interval(raw_mean)
+            success = mean_clamped >= SUCCESS_SCORE_THRESHOLD
+        else:
+            success = False
     finally:
         await env.close()
-        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
-    return score
+        log_end(success=success, steps=steps_taken, rewards=rewards)
 
 
 async def main() -> None:
@@ -168,13 +180,9 @@ async def main() -> None:
         "medium_db_latency",
         "hard_security_breach",
     ]
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    scores: List[float] = []
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     for task_name in selected_tasks:
-        score = await run_episode(task_name, client)
-        scores.append(score)
-    avg = sum(scores) / max(len(scores), 1)
-    print(f"[AGGREGATE] tasks={len(selected_tasks)} average_score={avg:.3f}", flush=True)
+        await run_episode(task_name, client)
 
 
 if __name__ == "__main__":

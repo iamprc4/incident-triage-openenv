@@ -91,28 +91,56 @@ uvicorn server.app:app --host 0.0.0.0 --port 7860
 
 ## Baseline inference
 
-`inference.py` is provided at repo root and prints required lines:
-- `[START] ...`
-- `[STEP] ...`
-- `[END] ...`
-- `[AGGREGATE] ...` (when evaluating multiple tasks)
+`inference.py` lives at the repo root and uses the **OpenAI** client only for LLM calls.
 
-Run deterministic baseline over all 3 tasks:
+### Hackathon stdout format (strict)
+
+Only these line types are printed (no extra lines such as `[AGGREGATE]`):
+
+1. **`[START]`** once per episode: `task=`, `env=`, `model=`
+2. **`[STEP]`** once per `env.step()`: `step=`, `action=`, `reward=` (2 decimals), `done=` (`true`|`false`), `error=` (raw string or `null`)
+3. **`[END]`** once after `env.close()`: `success=`, `steps=`, `rewards=` (comma-separated, 2 decimals each)
+
+Example shape:
+
+```text
+[START] task=easy_password_reset env=incident_triage_openenv model=gpt-4.1-mini
+[STEP] step=1 action={...} reward=0.85 done=true error=null
+[END] success=true steps=1 rewards=0.85
+```
+
+Three tasks run as **three episodes** back-to-back (each episode is START → STEP(s) → END).
+
+### Environment variables
+
+Per submission guidelines:
+
+- **`API_BASE_URL`** — LLM API base URL (**has a default** in `inference.py`)
+- **`MODEL_NAME`** — model id (**has a default** in `inference.py`)
+- **`HF_TOKEN`** — required; script raises if missing. If the evaluator only sets **`API_KEY`** (LiteLLM proxy), that value is accepted as the client credential when `HF_TOKEN` is unset.
+
+Optional:
+
+- **`POLICY_MODE`** — `llm` (default) or `heuristic` (no `chat.completions` calls; no real token required)
+- **`LOCAL_IMAGE_NAME`**
+- **`INCIDENT_TRIAGE_TASK`** — run a single task by name
 
 ```bash
 python inference.py
 ```
 
-Optional environment variables:
-- `API_KEY`
-- `API_BASE_URL`
-- `MODEL_NAME`
-- `LOCAL_IMAGE_NAME`
-- `POLICY_MODE` (`llm|heuristic`, default `llm` for validator compatibility)
-- `INCIDENT_TRIAGE_TASK` (`easy_password_reset|medium_db_latency|hard_security_breach`) to run a single task
+Reward values in logs are clamped to **strictly** between `0` and `1` when Phase-2-style checks apply.
 
-The validator path uses OpenAI client calls through injected `API_BASE_URL` + `API_KEY` by default.  
-Set `POLICY_MODE=heuristic` only for local reproducible offline checks.
+## Waitlist / resubmit checklist
+
+Official troubleshooting and guidelines: [Meta OpenEnv Hackathon: Guidelines](https://docs.google.com/document/d/1nth7bAacQOQEpVk6oIHV917YuRcLOowcSS1Ed-uNQVQ/edit?tab=t.0) (open while signed into Google if prompted).
+
+Before you resubmit:
+
+1. Push the same commit to **both** GitHub and your **HF Space** repo so the live Space matches GitHub.
+2. Confirm `POST /reset` works **with an empty body** and with `{"task_name":"..."}`.
+3. Run `inference.py` with **`HF_TOKEN`** (or **`API_KEY`** if that is what the evaluator injects), **`API_BASE_URL`**, and **`MODEL_NAME`** as required by the run; do not hardcode secrets.
+4. Re-run `openenv validate` and your pre-submission script after each change.
 
 ## Docker
 
