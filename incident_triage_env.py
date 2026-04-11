@@ -44,6 +44,10 @@ class GradeSignals(BaseModel):
     summary_quality: float = Field(ge=0.0, le=1.0)
 
 
+STRICT_MIN_SCORE = 0.01
+STRICT_MAX_SCORE = 0.99
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     name: str
@@ -116,6 +120,10 @@ TASKS: Dict[str, TaskSpec] = {
 }
 
 
+def _strict_open_unit_interval(value: float) -> float:
+    return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
+
+
 class IncidentTriageEnv:
     benchmark_name = "incident_triage_openenv"
 
@@ -155,10 +163,13 @@ class IncidentTriageEnv:
 
         self._attempts_used += 1
         signals = grade_action(self.task, action)
-        base_reward = sum(signals.model_dump().values()) / 6.0
+        base_reward = _strict_open_unit_interval(sum(signals.model_dump().values()) / 6.0)
         improvement_bonus = max(base_reward - self._best_reward, 0.0) * 0.15
         attempt_penalty = max(self._attempts_used - 1, 0) * 0.02
-        reward = round(min(max(base_reward + improvement_bonus - attempt_penalty, 0.0), 1.0), 4)
+        reward = round(
+            _strict_open_unit_interval(base_reward + improvement_bonus - attempt_penalty),
+            4,
+        )
         self._best_reward = max(self._best_reward, reward)
         self._last_signals = signals.model_dump()
 
@@ -174,8 +185,8 @@ class IncidentTriageEnv:
                 "solved": solved,
                 "max_attempts": maxed_attempts,
                 "base_reward": round(base_reward, 4),
-                "improvement_bonus": round(improvement_bonus, 4),
-                "attempt_penalty": round(attempt_penalty, 4),
+                "improvement_bonus": round(_strict_open_unit_interval(improvement_bonus), 4),
+                "attempt_penalty": round(_strict_open_unit_interval(attempt_penalty), 4),
             },
         )
 
@@ -205,9 +216,9 @@ class IncidentTriageEnv:
 def _full_phrase_coverage(text_lower: str, phrases: List[str]) -> float:
     """All phrases must appear for full credit; partial credit proportional to hits."""
     if not phrases:
-        return 1.0
+        return STRICT_MAX_SCORE
     hits = sum(1 for phrase in phrases if phrase in text_lower)
-    return hits / len(phrases)
+    return _strict_open_unit_interval(hits / len(phrases))
 
 
 def _summary_quality(action: IncidentAction, summary_terms: List[str]) -> float:
@@ -216,8 +227,8 @@ def _summary_quality(action: IncidentAction, summary_terms: List[str]) -> float:
     length_score = min(len(words) / 12.0, 1.0) if words else 0.0
     s = action.summary.lower()
     term_hits = sum(1 for t in summary_terms if t.lower() in s)
-    term_score = term_hits / len(summary_terms) if summary_terms else 1.0
-    return 0.45 * length_score + 0.55 * term_score
+    term_score = term_hits / len(summary_terms) if summary_terms else STRICT_MAX_SCORE
+    return _strict_open_unit_interval(0.45 * length_score + 0.55 * term_score)
 
 
 def grade_action(task: TaskSpec, action: IncidentAction) -> GradeSignals:
@@ -227,9 +238,9 @@ def grade_action(task: TaskSpec, action: IncidentAction) -> GradeSignals:
     msg_lower = action.customer_message.lower()
     summary_terms: List[str] = list(target.get("summary_terms", []))
 
-    category_score = 1.0 if action.category.lower() == target["category"] else 0.0
-    priority_score = 1.0 if action.priority.lower() == target["priority"] else 0.0
-    owner_score = 1.0 if action.owner_team.lower() == target["owner_team"] else 0.0
+    category_score = STRICT_MAX_SCORE if action.category.lower() == target["category"] else STRICT_MIN_SCORE
+    priority_score = STRICT_MAX_SCORE if action.priority.lower() == target["priority"] else STRICT_MIN_SCORE
+    owner_score = STRICT_MAX_SCORE if action.owner_team.lower() == target["owner_team"] else STRICT_MIN_SCORE
     runbook_score = _full_phrase_coverage(runbook_text, target["keywords"])
     customer_msg_score = _full_phrase_coverage(msg_lower, target["message_keywords"])
     summary_score = _summary_quality(action, summary_terms)

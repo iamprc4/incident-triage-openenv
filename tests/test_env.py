@@ -54,10 +54,10 @@ def test_reset_and_step_reward_bounds() -> None:
 
             action = _baseline_action(task_name)
             result2 = await env.step(action)
-            assert 0.0 <= result2.reward <= 1.0
+            assert 0.0 < result2.reward < 1.0
             assert isinstance(result2.done, bool)
-            assert "base_reward" in result2.info
-            assert "improvement_bonus" in result2.info
-            assert "attempt_penalty" in result2.info
+            assert 0.0 < result2.info["base_reward"] < 1.0
+            assert 0.0 < result2.info["improvement_bonus"] < 1.0
+            assert 0.0 < result2.info["attempt_penalty"] < 1.0
 
     asyncio.run(run())
