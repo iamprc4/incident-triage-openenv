@@ -9,7 +9,6 @@ from incident_triage_env import IncidentAction, IncidentTriageEnv
 
 IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME") or os.getenv("IMAGE_NAME")
 
-# Per hackathon guidelines: defaults for API_BASE_URL and MODEL_NAME; HF_TOKEN mandatory.
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4.1-mini")
 TASK_NAME = os.getenv("INCIDENT_TRIAGE_TASK", "")
@@ -27,8 +26,6 @@ MAX_STEPS = 3
 TEMPERATURE = 0.0
 MAX_TOKENS = 280
 SUCCESS_SCORE_THRESHOLD = 0.85
-# Phase-2 style checks sometimes require scores strictly inside (0, 1); keep logs in open interval.
-# With :.2f formatting, 0.999 prints as "1.00"; cap at 0.99 so logs stay strictly below 1.00.
 STRICT_MIN_SCORE = 0.01
 STRICT_MAX_SCORE = 0.99
 
@@ -38,7 +35,6 @@ def _strict_unit_interval(value: float) -> float:
 
 
 def _single_line_log_value(text: str, max_len: int = 240) -> str:
-    """One log line must not contain raw newlines; keep action/error compact."""
     if not text:
         return ""
     s = text.replace("\n", " ").replace("\r", " ")
@@ -54,10 +50,7 @@ def log_start(task: str, env: str, model: str) -> None:
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     safe_action = _single_line_log_value(action, max_len=240)
-    if error:
-        safe_error = _single_line_log_value(error, max_len=200)
-    else:
-        safe_error = "null"
+    safe_error = _single_line_log_value(error, max_len=200) if error else "null"
     reward_clamped = _strict_unit_interval(reward)
     print(
         f"[STEP] step={step} action={safe_action} reward={reward_clamped:.2f} done={str(done).lower()} error={safe_error}",
@@ -66,7 +59,6 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    """Exactly one [END] line: success, steps, rewards only (no score field)."""
     clamped = [_strict_unit_interval(r) for r in rewards]
     rewards_str = ",".join(f"{r:.2f}" for r in clamped) if clamped else ""
     print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
@@ -153,7 +145,6 @@ def get_action_from_llm(client: OpenAI, ticket_text: str, task_name: str) -> Inc
 
 
 async def run_episode(task_name: str, client: OpenAI) -> None:
-    """One episode: [START], then [STEP] per step, then [END] after close. No other stdout."""
     env = await IncidentTriageEnv.from_docker_image(IMAGE_NAME, task_name=task_name)
     rewards: List[float] = []
     steps_taken = 0
@@ -172,7 +163,8 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             else:
                 action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
             result = await env.step(action)
-            reward = float(result.reward or 0.0)
+            # Clamp immediately after receiving from env — never store raw 0.0 or 1.0
+            reward = _strict_unit_interval(float(result.reward) if result.reward is not None else STRICT_MIN_SCORE)
             rewards.append(reward)
             steps_taken = step
             log_step(step, action.summary, reward, result.done, result.observation.last_action_error)
@@ -204,5 +196,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Some runtimes raise KeyboardInterrupt during loop teardown after work completed.
         pass
