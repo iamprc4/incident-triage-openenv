@@ -36,12 +36,12 @@ class StepResult(BaseModel):
 
 
 class GradeSignals(BaseModel):
-    category: float = Field(ge=0.0, le=1.0)
-    priority: float = Field(ge=0.0, le=1.0)
-    owner_team: float = Field(ge=0.0, le=1.0)
-    runbook_quality: float = Field(ge=0.0, le=1.0)
-    customer_message_quality: float = Field(ge=0.0, le=1.0)
-    summary_quality: float = Field(ge=0.0, le=1.0)
+    category: float = Field(gt=0.0, lt=1.0)
+    priority: float = Field(gt=0.0, lt=1.0)
+    owner_team: float = Field(gt=0.0, lt=1.0)
+    runbook_quality: float = Field(gt=0.0, lt=1.0)
+    customer_message_quality: float = Field(gt=0.0, lt=1.0)
+    summary_quality: float = Field(gt=0.0, lt=1.0)
 
 
 STRICT_MIN_SCORE = 0.01
@@ -74,7 +74,6 @@ TASKS: Dict[str, TaskSpec] = {
             "owner_team": "support",
             "keywords": ["mfa reset", "verify identity"],
             "message_keywords": ["help", "verify", "restore access"],
-            # Must reflect ticket substance (noise-resistant).
             "summary_terms": ["mfa", "phone"],
         },
         max_attempts=2,
@@ -140,7 +139,6 @@ class IncidentTriageEnv:
 
     @classmethod
     async def from_docker_image(cls, _image_name: Optional[str] = None, task_name: str = "easy_password_reset") -> "IncidentTriageEnv":
-        # Local fallback for baseline reproducibility when running without a container runtime.
         return cls(task_name=task_name)
 
     async def reset(self) -> StepResult:
@@ -237,7 +235,7 @@ def _summary_quality(action: IncidentAction, summary_terms: List[str]) -> float:
 
 
 def grade_action(task: TaskSpec, action: IncidentAction) -> GradeSignals:
-    """Deterministic agent grader with partial credit in [0.0, 1.0]."""
+    """Deterministic agent grader with partial credit in (0.0, 1.0)."""
     target = task.target
     runbook_text = " ".join(action.runbook_steps).lower()
     msg_lower = action.customer_message.lower()
