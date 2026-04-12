@@ -26,8 +26,8 @@ MAX_STEPS = 3
 TEMPERATURE = 0.0
 MAX_TOKENS = 280
 SUCCESS_SCORE_THRESHOLD = 0.85
-STRICT_MIN_SCORE = 0.01
-STRICT_MAX_SCORE = 0.99
+STRICT_MIN_SCORE = 0.001
+STRICT_MAX_SCORE = 0.999
 
 
 def _strict_unit_interval(value: float) -> float:
@@ -50,7 +50,7 @@ def log_start(task: str, env: str, model: str) -> None:
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
     safe_action = _single_line_log_value(action, max_len=240)
-    safe_error = _single_line_log_value(error, max_len=200) if error else "null"
+    safe_error = error if error else "null"
     reward_clamped = _strict_unit_interval(reward)
     print(
         f"[STEP] step={step} action={safe_action} reward={reward_clamped:.2f} done={str(done).lower()} error={safe_error}",
@@ -59,9 +59,13 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    clamped = [_strict_unit_interval(r) for r in rewards]
+    clamped = [_strict_unit_interval(r) for r in rewards] if rewards else [STRICT_MIN_SCORE]
+    score = _strict_unit_interval(sum(clamped) / len(clamped))
     rewards_str = ",".join(f"{r:.2f}" for r in clamped)
-    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
 
 
 def _heuristic_action(ticket_text: str, task_name: str) -> IncidentAction:
@@ -144,7 +148,7 @@ def get_action_from_llm(client: OpenAI, ticket_text: str, task_name: str) -> Inc
         return _heuristic_action(ticket_text, task_name)
 
 
-async def run_episode(task_name: str, client: OpenAI) -> None:
+async def run_episode(task_name: str, client: OpenAI) -> float:
     env = await IncidentTriageEnv.from_docker_image(IMAGE_NAME, task_name=task_name)
     rewards: List[float] = []
     steps_taken = 0
@@ -163,7 +167,6 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             else:
                 action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
             result = await env.step(action)
-            # Clamp immediately — never store raw 0.0 or 1.0
             reward = _strict_unit_interval(float(result.reward) if result.reward is not None else STRICT_MIN_SCORE)
             rewards.append(reward)
             steps_taken = step
@@ -171,19 +174,19 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             if result.done:
                 break
         if rewards:
-            raw_mean = sum(rewards) / len(rewards)
-            mean_clamped = _strict_unit_interval(raw_mean)
-            success = mean_clamped >= SUCCESS_SCORE_THRESHOLD
+            score = _strict_unit_interval(sum(rewards) / len(rewards))
+            success = score >= SUCCESS_SCORE_THRESHOLD
         else:
+            score = STRICT_MIN_SCORE
             success = False
     except Exception:
-        pass
+        score = STRICT_MIN_SCORE
+        success = False
     finally:
         await env.close()
-        # Ensure rewards is never empty — empty list would emit score 0.0
-        if not rewards:
-            rewards = [STRICT_MIN_SCORE]
         log_end(success=success, steps=steps_taken, rewards=rewards)
+
+    return score
 
 
 async def main() -> None:
@@ -193,8 +196,12 @@ async def main() -> None:
         "hard_security_breach",
     ]
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+    scores: List[float] = []
     for task_name in selected_tasks:
-        await run_episode(task_name, client)
+        score = await run_episode(task_name, client)
+        scores.append(score)
+    avg = _strict_unit_interval(sum(scores) / max(len(scores), 1))
+    print(f"[AGGREGATE] tasks={len(selected_tasks)} average_score={avg:.3f}", flush=True)
 
 
 if __name__ == "__main__":
