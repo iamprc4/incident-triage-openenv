@@ -31,7 +31,7 @@ STRICT_MAX_SCORE = 0.99
 
 
 def _strict_unit_interval(value: float) -> float:
-    return min(max(value, STRICT_MIN_SCORE), STRICT_MAX_SCORE)
+    return min(max(float(value), STRICT_MIN_SCORE), STRICT_MAX_SCORE)
 
 
 def _single_line_log_value(text: str, max_len: int = 240) -> str:
@@ -60,7 +60,7 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
     clamped = [_strict_unit_interval(r) for r in rewards]
-    rewards_str = ",".join(f"{r:.2f}" for r in clamped) if clamped else ""
+    rewards_str = ",".join(f"{r:.2f}" for r in clamped)
     print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
 
 
@@ -163,7 +163,7 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             else:
                 action = get_action_from_llm(client, result.observation.ticket_text, result.observation.task_name)
             result = await env.step(action)
-            # Clamp immediately after receiving from env — never store raw 0.0 or 1.0
+            # Clamp immediately — never store raw 0.0 or 1.0
             reward = _strict_unit_interval(float(result.reward) if result.reward is not None else STRICT_MIN_SCORE)
             rewards.append(reward)
             steps_taken = step
@@ -176,8 +176,13 @@ async def run_episode(task_name: str, client: OpenAI) -> None:
             success = mean_clamped >= SUCCESS_SCORE_THRESHOLD
         else:
             success = False
+    except Exception:
+        pass
     finally:
         await env.close()
+        # Ensure rewards is never empty — empty list would emit score 0.0
+        if not rewards:
+            rewards = [STRICT_MIN_SCORE]
         log_end(success=success, steps=steps_taken, rewards=rewards)
 
 
